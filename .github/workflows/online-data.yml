@@ -1,0 +1,43 @@
+name: Refresh public shows and weather
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17,47 * * * *'
+  push:
+    branches: [main]
+    paths: ['scripts/refresh-public-data.mjs', '.github/workflows/online-data.yml']
+permissions:
+  contents: write
+  pages: write
+concurrency:
+  group: roro-public-data
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Collect public online data
+        run: node scripts/refresh-public-data.mjs
+      - name: Save updated data
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add data/
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update public shows and weather'
+            git push
+          fi
+      - name: Request Pages rebuild
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          const reply=await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/pages/builds`,{method:'POST',headers:{Authorization:`Bearer ${process.env.GITHUB_TOKEN}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}});
+          if(!reply.ok)throw new Error(`Pages rebuild returned ${reply.status}: ${await reply.text()}`);
+          console.log('Pages rebuild requested.');
+          JS
