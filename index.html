@@ -1,3 +1,70 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="theme-color" content="#f5efdf"><title>一份小礼物</title><link rel="icon" href="assets/heart.svg" type="image/svg+xml"><link rel="stylesheet" href="styles.css"><script type="module" src="bootstrap.js"></script></head>
-<body><main style="min-height:100svh;display:grid;place-content:center;padding:32px;text-align:center"><h1>一份小礼物</h1><p id="gift-message" role="status" aria-live="polite">正在打开…</p><noscript>启用 JavaScript 后，才能在本机打开这份加密礼物。</noscript></main></body></html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="theme-color" content="#f5efdf"><title>一份小礼物</title><style>html,body{margin:0;background:#f5efdf;color:#3e493d;font-family:system-ui,sans-serif}.gift-opening{min-height:100vh;min-height:100svh;display:grid;place-content:center;padding:32px;box-sizing:border-box;text-align:center}.gift-opening h1{font-size:26px;font-weight:400}.gift-opening p{line-height:1.8}#gift-retry{margin:12px auto;padding:10px 24px;border:1px solid #64725c;border-radius:24px;background:#fffaf0;color:#3e493d;font:inherit}#gift-retry[hidden]{display:none}</style><link rel="icon" href="assets/heart.svg" type="image/svg+xml"><link id="gift-style" rel="stylesheet" href="styles.css" media="print" onload="this.media='all'"></head>
+<body><main class="gift-opening"><h1>一份小礼物</h1><p id="gift-message" role="status" aria-live="polite">正在打开…</p><button id="gift-retry" type="button" hidden>再试一次</button><noscript>启用 JavaScript 后，才能在本机打开这份加密礼物。</noscript></main><script>/* This small loader stays inline so its message does not depend on another request. */
+(function () {
+  var done = false, failed = false, appReady = false, styleReady = false, styleFailed = false, attempts = 0, timer;
+  function show(text, retry, keepWaiting) {
+    if (retry && !keepWaiting) { failed = true; clearTimeout(timer); }
+    var node = document.getElementById('gift-message');
+    if (!node) {
+      var note = document.createElement('aside');
+      note.id = 'gift-opening-note';
+      note.style.cssText = 'position:fixed;z-index:9999;left:16px;right:16px;top:16px;padding:18px;background:#fffaf0;color:#3e493d;border:1px solid #c6c9b5;border-radius:12px;text-align:center';
+      node = document.createElement('p'); node.id = 'gift-message'; node.setAttribute('role', 'status'); note.appendChild(node);
+      var button = document.createElement('button'); button.id = 'gift-retry'; button.textContent = '再试一次';
+      note.appendChild(button); document.body.appendChild(note);
+    }
+    node.textContent = text;
+    var retryButton = document.getElementById('gift-retry');
+    if (retryButton) { retryButton.hidden = !retry; retryButton.onclick = function () { location.reload(); }; }
+  }
+  window.RORO_OPEN_STATUS = show;
+  function finish() {
+    if (!appReady || !styleReady) return;
+    done = true; clearTimeout(timer);
+    var note = document.getElementById('gift-opening-note'); if (note) note.remove();
+  }
+  window.RORO_OPEN_DONE = function () {
+    appReady = true;
+    if (styleFailed) show('页面样式暂时没有下载完整，请再试一次。', true);
+    else finish();
+  };
+  var style = document.getElementById('gift-style');
+  var styleAttempts = 0;
+  function watchStyle(link) {
+    var settled = false, styleTimer;
+    function retryStyle() {
+      if (settled) return;
+      settled = true; clearTimeout(styleTimer);
+      if (++styleAttempts < 3) {
+        var next = document.createElement('link');
+        next.id = 'gift-style'; next.rel = 'stylesheet'; next.media = 'print'; next.href = 'styles.css?retry=' + styleAttempts;
+        watchStyle(next); link.parentNode.replaceChild(next, link);
+      } else { styleFailed = true; show('页面样式暂时没有下载完整，请再试一次。', true, true); }
+    }
+    link.onload = function () { if (settled) return; settled = true; clearTimeout(styleTimer); styleReady = true; link.media = 'all'; finish(); };
+    link.onerror = retryStyle;
+    if (link.sheet) link.onload();
+    else styleTimer = setTimeout(retryStyle, 12000);
+  }
+  watchStyle(style);
+  function start() {
+    var script = document.createElement('script');
+    if (!('noModule' in script)) { show('当前微信版本较旧，暂时无法打开。请更新微信后再试。', true); return; }
+    script.type = 'module'; script.src = './bootstrap.js' + (attempts ? '?retry=' + attempts : '');
+    script.onerror = function () {
+      if (++attempts < 3) { show('网络有点慢，正在再试一次…', true, true); setTimeout(start, 800 * attempts); }
+      else { show('页面暂时没有下载完整。请检查网络，点“再试一次”。', true); }
+    };
+    document.body.appendChild(script);
+  }
+  function monitor() {
+    if (done || failed) return;
+    show(styleFailed ? '页面样式暂时没有下载完整，请再试一次。' : '网络有点慢，还在打开。你也可以点“再试一次”。', true, true);
+    timer = setTimeout(monitor, 15000);
+  }
+  timer = setTimeout(monitor, 15000);
+  show('正在打开…', false);
+  start();
+})();
+</script></body></html>

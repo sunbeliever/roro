@@ -1,7 +1,28 @@
 window.RORO_STATIC_HOST = true;
 // Private data and the decryption key never belong in this public file.
+async function giftFetchBytes(url, { attempts = 3, timeoutMs = 12000, delayMs = 500, onRetry = () => {} } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const controller = new AbortController();
+    let timer;
+    try {
+      const request = (async () => {
+        const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'no-referrer', signal: controller.signal });
+        if (!response.ok) { const error = new Error(`HTTP ${response.status}`); error.status = response.status; throw error; }
+        return response.arrayBuffer();
+      })();
+      return await Promise.race([request, new Promise((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('Resource timeout')); controller.abort(); }, timeoutMs);
+      })]);
+    } catch (error) {
+      if (attempt + 1 >= attempts || (error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status))) throw error;
+      onRetry(attempt + 1);
+      await new Promise(resolve => setTimeout(resolve, delayMs * (attempt + 1)));
+    } finally { clearTimeout(timer); }
+  }
+}
+
 (async () => {
-  const status = text => { const node = document.getElementById('gift-message'); if (node) node.textContent = text; };
+  const status = (text, retry = true) => { if (window.RORO_OPEN_STATUS) window.RORO_OPEN_STATUS(text, retry); else { const node = document.getElementById('gift-message'); if (node) node.textContent = text; } };
   if (!globalThis.crypto?.subtle) { status('这个浏览器暂时不支持安全解密。请通过 HTTPS 链接，用新版微信或系统浏览器打开。'); return; }
   let encodedKey;
   const incoming = new URLSearchParams(location.hash.slice(1)).get('gift');
@@ -17,9 +38,8 @@ window.RORO_STATIC_HOST = true;
       if (encrypted.length < 28) throw new Error('Invalid resource');
       return crypto.subtle.decrypt({ name: 'AES-GCM', iv: encrypted.subarray(0, 12), tagLength: 128 }, key, encrypted.subarray(12));
     };
-    const response = await fetch('./sealed/envelope.bin', { cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'no-referrer' });
-    if (!response.ok) throw new Error('Envelope unavailable');
-    const envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await decrypt(await response.arrayBuffer())));
+    const envelopeBytes = await giftFetchBytes('./sealed/envelope.bin', { onRetry: () => status('网络有点慢，正在再试一次…', false) });
+    const envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await decrypt(envelopeBytes)));
     if (envelope.version !== 1 || typeof envelope.html !== 'string' || !envelope.content || !Array.isArray(envelope.album?.photos) || !envelope.files || !envelope.mime) throw new Error('Invalid envelope');
     try { sessionStorage.setItem('roro-gift-key', encodedKey); } catch { /* Opening remains possible when session storage is disabled. */ }
     const canonical = value => String(value).replace(/^(?:\.\/)+/, '').replace(/^\//, '');
@@ -35,9 +55,8 @@ window.RORO_STATIC_HOST = true;
       const pending = (async () => {
         const sealed = envelope.files[privatePath], mime = envelope.mime[privatePath];
         if (typeof sealed !== 'string' || !/^sealed\/[a-f0-9]{64}\.bin$/.test(sealed) || typeof mime !== 'string') throw new Error('Unknown private resource');
-        const result = await fetch(sealed, { cache: 'no-store', credentials: 'same-origin', referrerPolicy: 'no-referrer' });
-        if (!result.ok) throw new Error('Private resource unavailable');
-        const url = URL.createObjectURL(new Blob([await decrypt(await result.arrayBuffer())], { type: mime }));
+        const bytes = await giftFetchBytes(sealed, { timeoutMs: mime.startsWith('video/') ? 45000 : 15000 });
+        const url = URL.createObjectURL(new Blob([await decrypt(bytes)], { type: mime }));
         urls.add(url);
         return url;
       })();
@@ -106,8 +125,9 @@ window.RORO_STATIC_HOST = true;
     const app = document.createElement('script');
     app.type = 'module';
     app.src = './app.js';
+    app.addEventListener('load', () => window.RORO_OPEN_DONE?.());
     app.addEventListener('error', () => {
-      const notice = document.createElement('p'); notice.setAttribute('role', 'status'); notice.textContent = '页面暂时没有完整打开，请刷新再试。'; document.body.append(notice);
+      status('页面暂时没有完整打开。请点“再试一次”；如果多次失败，请更新微信后再打开。');
     });
     document.body.append(app);
   } catch {
